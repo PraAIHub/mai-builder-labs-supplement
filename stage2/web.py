@@ -1,6 +1,6 @@
 """Browser UI for the agent, using only Python's built-in http.server.
 
-    python3 web.py        then open http://localhost:8000
+    python3 web.py        then open http://localhost:8001
 
 No Flask, no install. The point of the page is not the chat box — it is
 the right-hand panel, where you can watch the ReAct trace and both kinds
@@ -16,6 +16,7 @@ The page markup lives in ui/chat.html.
 """
 
 import json
+import os
 import uuid
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,7 +32,9 @@ from ami.llm import MODEL
 from ami.memory import ConversationMemory, LongTermMemory, WorkingMemory
 from ami import ROOT          # the stage folder
 
-PORT = 8000
+# Both stages ship the same server, so PORT is overridable to run them
+# side by side: PORT=8002 python3 web.py
+PORT = int(os.environ.get("PORT", 8001))
 SYSTEM = profile.system_prompt()          # planner rules are added per request
 
 # The two planners are interchangeable: same inputs, same outputs. The page
