@@ -18,6 +18,7 @@ the flag and decides whether the call goes through (policy.guarded_run).
 
 from datetime import date
 
+from ami import desk
 from ami import knowledge
 from ami import observe
 from ami import store
@@ -142,10 +143,25 @@ def search_knowledge(question):
 
 
 def escalate(summary):
-    """Hand off to a human. The honest answer when no other tool fits."""
+    """Hand off to a human. The honest answer when no other tool fits.
+
+    This used to return a fixed ticket number, which meant the promise
+    to the customer was fiction. It now opens a real ticket on the
+    helpdesk over MCP (see desk.py), and says the number the desk gave
+    back. If the desk cannot be reached it returns an error rather than
+    a comforting lie — the model can then tell the customer the truth.
+    """
+    ticket = desk.create_ticket(
+        title=summary,
+        body="Escalated by Ami, the support agent.\n\n"
+             f"What the customer needs:\n{summary}\n",
+    )
+    if "error" in ticket:
+        return {"error": f"Could not open a helpdesk ticket: {ticket['error']}"}
     return {
         "escalated": True,
-        "ticket": "ESC-4417",
+        "ticket": desk.ticket_ref(ticket),      # the number the customer hears
+        "ticket_id": ticket.get("id"),          # the integer add_note needs
         "message": "A human agent will email you within 24 hours.",
         "summary": summary,
     }
@@ -220,7 +236,9 @@ SCHEMAS = [
 
     _tool("escalate",
           "Hand the conversation to a human agent. Use when the customer asks "
-          "for a human, is very upset, or the request is outside these tools.",
+          "for a human, is very upset, or the request is outside these tools. "
+          "This opens a real ticket on the helpdesk and returns its number — "
+          "tell the customer the number.",
           {"summary": {"type": "string",
                        "description": "One-line summary of the issue for the human agent"}},
           ["summary"]),
