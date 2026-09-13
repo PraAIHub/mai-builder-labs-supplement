@@ -4,3 +4,7 @@
 openai
 python-dotenv
 chromadb
+
+# scripts/mcp_desk.py speaks MCP over streamable HTTP to the class desk
+# server, authenticating with the same key as the LLM proxy above.
+mcp
