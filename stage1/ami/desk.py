@@ -36,6 +36,12 @@ load_dotenv()
 
 URL = os.environ.get("MCP_DESK_URL", "https://learn.modernaipro.com/desk/mcp")
 
+# Who the ticket is for. The desk falls back to a shared demo customer
+# when this is empty, which makes every student's escalation look the
+# same in the queue — set DESK_CUSTOMER_EMAIL in .env to find your own.
+CUSTOMER_EMAIL = os.environ.get("DESK_CUSTOMER_EMAIL", "").strip()
+CUSTOMER_NAME = os.environ.get("DESK_CUSTOMER_NAME", "").strip()
+
 # A customer is waiting on the other end of this call, so the read
 # timeout is seconds rather than the SDK's default five minutes.
 TIMEOUT = httpx2.Timeout(10.0, read=30.0)
@@ -48,8 +54,11 @@ TIMEOUT = httpx2.Timeout(10.0, read=30.0)
 def create_ticket(title, body, customer_email=None, priority="normal"):
     """Open a ticket for a human. Returns the ticket, or {"error": ...}."""
     args = {"title": title[:200], "body": body[:8000], "priority": priority}
-    if customer_email:
-        args["customer_email"] = customer_email
+    email = customer_email or CUSTOMER_EMAIL
+    if email:
+        args["customer_email"] = email
+    if CUSTOMER_NAME:
+        args["body"] = f"{args['body']}\nReported by: {CUSTOMER_NAME} <{email}>\n"[:8000]
     return _call("create_ticket", args)
 
 
