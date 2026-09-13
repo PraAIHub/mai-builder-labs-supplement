@@ -137,3 +137,73 @@ def react(convo, work, trace=True, steps=None, longterm=None, extra=None):
 
     return ("I'm not able to sort this out myself. Let me get a human agent "
             "to take a look.")
+
+
+CHAINS_OF_THOUGHT_RULES = """
+HOW YOU PLAN
+Break down your reasoning into clear steps before acting.
+- Think through the problem step by step in your internal monologue
+- Before every tool call, state your complete reasoning in the 'thought' argument:
+  what you already know, what is still missing, and why this tool is next.
+- Take ONE action at a time. Read the observation before deciding again.
+- Errors come in two kinds, and they are handled differently:
+  * "retry": true  -> YOU called the tool wrongly. Fix the arguments and
+    call it again. Do not tell the customer about this.
+  * no retry flag  -> a POLICY refusal. Never repeat the call. Tell the
+    customer the rule and offer their next option.
+- Stop as soon as you can answer. Do not call tools you do not need.
+"""
+
+
+def chains_of_thought(convo, work, trace=True, steps=None, longterm=None, extra=None):
+    """Run the chains-of-thought loop until the agent produces an answer.
+
+    Chains of thought: the agent reasons through the problem step-by-step
+    before making tool calls, with explicit intermediate reasoning steps.
+
+    convo    : ConversationMemory — what was said, sent in full to the model
+    work     : WorkingMemory      — what is known, injected as a short note
+    longterm : LongTermMemory     — what we know about this customer already
+    extra    : a one-off note (e.g. from the input policy check)
+    trace    : print the Thought/Action/Observation trace to the terminal
+    steps    : optional list; each step is appended as a dict so a caller
+               (the web UI) can render the trace instead of printing it
+    """
+    for step in range(1, MAX_STEPS + 1):
+        # Working memory is re-read before EVERY step, so the agent plans
+        # against what it has already established, not just the transcript.
+        response = complete(convo.messages(extra_system=notes(work, longterm, extra)),
+                            tools=SCHEMAS)
+        message = response.choices[0].message
+        convo.add_assistant(message.model_dump(exclude_none=True))
+
+        # No action requested -> the agent is done reasoning, this is the answer.
+        if not message.tool_calls:
+            return message.content
+
+        for call in message.tool_calls:
+            name = call.function.name
+            try:
+                args = json.loads(call.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+
+            # Pull the reasoning out; it is for us, not for the tool.
+            thought = args.pop("thought", "(no thought given)")
+            result = policy.guarded_run(name, args, work)   # policy first, then the tool
+            work.record(name, args, result)      # <- the observation updates what we know
+
+            if steps is not None:
+                steps.append({"n": step, "thought": thought, "tool": name,
+                              "args": args, "observation": result})
+
+            if trace:
+                arg_str = ", ".join(f"{k}={v!r}" for k, v in args.items())
+                print(f"  [{step}] Thought: {thought}")
+                print(f"      Action: {name}({arg_str})")
+                print(f"      Observation: {json.dumps(result)}\n")
+
+            convo.add_observation(call.id, result)
+
+    return ("I'm not able to sort this out myself. Let me get a human agent "
+            "to take a look.")

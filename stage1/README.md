@@ -2,7 +2,7 @@
 
 Profile, memory, planning and action, plus a knowledge layer, a web UI, a
 trace log and two kinds of evals. The reasoning is in `../README.md`; the
-modules are listed in `ami/__init__.py`.
+modules are listed in `ami/__init__.py`, and the browser pages are in `ui/`.
 
     python3 main.py          # terminal chat, ReAct trace shown
     python3 web.py           # http://localhost:8000  (and /logs)

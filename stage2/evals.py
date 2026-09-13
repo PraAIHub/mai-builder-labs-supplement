@@ -4,7 +4,7 @@
     python3 evals.py --planner plan      plan-and-execute
     python3 evals.py --runs 3            each case three times (they are not deterministic)
     python3 evals.py --only guard        cases whose name contains "guard"
-    python3 evals.py --out results/react.json    where to write the results
+    python3 evals.py --out results/eval_results.json    where to write the results
 
 A case says what a good answer looks like in terms we can CHECK:
 
@@ -36,10 +36,10 @@ This file grades what the agent DID. golden.py grades what it SAID.
 """
 
 import argparse
+import contextlib
 import importlib
 import io
 import json
-import contextlib
 import sys
 import time
 from pathlib import Path
@@ -184,7 +184,8 @@ def run_case(case, planner_name):
     policy.guarded_run, tools.run = spy_guard, spy_run
 
     run, rules = {"react": (planner.react, planner.PLANNING_RULES),
-                  "plan": (plan_execute.plan_execute, plan_execute.PLANNING_RULES)}[planner_name]
+                  "plan": (plan_execute.plan_execute, plan_execute.PLANNING_RULES),
+                  "chains_of_thought": (planner.chains_of_thought, planner.CHAINS_OF_THOUGHT_RULES)}[planner_name]
     convo = memory.ConversationMemory(agent_profile.system_prompt() + rules)
     work = memory.WorkingMemory()
     longterm = memory.LongTermMemory("/dev/null")    # evals never touch real customers
@@ -256,10 +257,12 @@ def score(case, r):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--planner", default="react", choices=["react", "plan"])
+    ap.add_argument("--planner", default="react", choices=["react", "plan", "chains_of_thought"])
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default="results/eval_results.json")
+    ap.add_argument("--feedback", action="store_true",
+                    help="Show impact of feedback from state/feedback.jsonl on golden set")
     a = ap.parse_args()
 
     cases = [c for c in CASES if a.only.lower() in c["name"].lower()]
@@ -290,6 +293,32 @@ def main():
     print(f"\n{passed_total}/{total} passed  "
           f"({100 * passed_total // total if total else 0}%)  ·  "
           f"total cost ${sum(o['cost'] for r in results for o in r['outcomes']):.3f}")
+
+    # Feedback analysis: show impact if --feedback is set
+    if a.feedback:
+        feedback_summary_path = Path(__file__).parent / "state" / "feedback_summary.json"
+        if feedback_summary_path.exists():
+            with open(feedback_summary_path) as f:
+                feedback_summary = json.load(f)
+            print(f"\n=== Feedback Impact Analysis ===")
+            print(f"Feedback entries analyzed: {feedback_summary.get('feedback_count', 0)}")
+            print(f"Golden rows with feedback: {feedback_summary.get('golden_rows_with_feedback', 0)}")
+            if feedback_summary.get("analysis"):
+                print(f"\nTop patterns in corrections:")
+                for pattern in feedback_summary["analysis"].get("top_patterns", [])[:3]:
+                    print(f"  {pattern['category']:20} {pattern['count']:3} "
+                          f"({pattern['percentage']:5.1f}%)")
+            if feedback_summary.get("proposals"):
+                print(f"\nProposals for golden.json:")
+                for prop in feedback_summary["proposals"][:5]:
+                    print(f"  {prop['golden_id']:20} {prop['recommendation']}")
+            print(f"\nNext steps:")
+            for step in feedback_summary.get("next_steps", [])[:3]:
+                print(f"  • {step['action']}: {step['reason']}")
+        else:
+            print(f"\n(No feedback summary found at {feedback_summary_path})")
+            print(f"Run: python3 feedback_analysis.py")
+
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     json.dump(results, open(a.out, "w"), indent=1)
     sys.exit(0 if passed_total == total else 1)

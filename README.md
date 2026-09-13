@@ -34,6 +34,7 @@ stage1/
 ├── evals.py             score what the agent DID
 ├── golden.py            score what the agent SAID, against golden.json
 ├── ami/                 the agent — one module per element, listed in ami/__init__.py
+├── ui/                  the two pages the browser gets: chat.html and logs.html
 ├── knowledge/           the written rules the agent retrieves from
 ├── results/             what the two eval scripts write; sample runs included
 ├── state/               generated: sessions.json, trace.jsonl (Stage 2: customers.json)
@@ -55,7 +56,7 @@ UI and observability:
 | `ami/tools.py`, `ami/store.py` | **Action** — seven tools with guardrails, over a fake order database |
 | `knowledge/`, `ami/knowledge.py`, `ami/embedder.py` | **Knowledge** — four shelves of written rules in a vector database, retrieved by a model that runs on the laptop |
 | `ami/llm.py`, `ami/pricing.py` | the single model entry point, and what a call costs |
-| `web.py`, `ami/dashboard.py` | browser UI (stdlib `http.server`) and the `/logs` page |
+| `web.py`, `ami/dashboard.py`, `ui/` | browser UI (stdlib `http.server`) and the `/logs` page; the markup is in `ui/chat.html` and `ui/logs.html` |
 | `ami/observe.py` | the trace log every model and tool call writes to |
 | `evals.py` | **Evals** — what the agent DID: tools called, refusals, the store afterwards |
 | `golden.py`, `golden.json` | **Evals** — what the agent SAID, graded against reference answers |
@@ -176,9 +177,9 @@ byte-identical to the one in `stage1/`.
 | Changed | `ami/agent_profile.py` | one rule added: preview, ask, then confirm |
 | Changed | `ami/memory.py` | `LongTermMemory`; `turn` and `pending` on `WorkingMemory` for the confirmation gate |
 | Changed | `ami/__init__.py` | lists the two new modules |
-| Changed | `main.py`, `web.py` | policy checks around every turn, long-term memory read and written, `--plan` and a planner switch |
+| Changed | `main.py`, `web.py`, `ui/chat.html` | policy checks around every turn, long-term memory read and written, `--plan` and a planner switch |
 | Changed | `evals.py`, `golden.py`, `golden.json` | two spies (asked for vs ran), a confirmation turn where an order changes, three policy cases and one golden row, `--planner plan` instead of `baseline` |
-| Same | `ami/agent.py`, `ami/store.py`, `ami/knowledge.py`, `ami/embedder.py`, `ami/llm.py`, `ami/pricing.py`, `ami/observe.py`, `ami/dashboard.py`, `knowledge/` | Stage 1, unchanged |
+| Same | `ami/agent.py`, `ami/store.py`, `ami/knowledge.py`, `ami/embedder.py`, `ami/llm.py`, `ami/pricing.py`, `ami/observe.py`, `ami/dashboard.py`, `ui/logs.html`, `knowledge/` | Stage 1, unchanged |
 
 To see the whole delta in one command (`-ru` instead of `-rq` shows the lines):
 
@@ -197,3 +198,134 @@ python3 golden.py --audit                 # grade the judge itself, first
 
 Both stages share `.env` and `requirements.txt` from the folder above, and
 keep their own `state/`, `.cache/` and `results/`.
+
+## Feedback Loop — Human Corrections into Golden Sets
+
+The feedback system captures human corrections, analyzes patterns, and proposes
+updates to golden.json to improve the agent.
+
+### Feedback capture workflow
+
+The workflow starts with human evaluation:
+
+1. **Humans evaluate agent responses**: When running the agent (via `web.py` or
+   `main.py`), humans note when the agent gets something wrong.
+
+2. **Bravo captures feedback**: Agent Bravo in the swarm collects corrections
+   into `state/feedback.jsonl`, one line per feedback entry. Each entry
+   records what the agent should have said, and what category of error it was.
+
+3. **Charlie analyzes feedback**: You run `feedback_analysis.py` to extract
+   patterns from the feedback and propose golden.json changes.
+
+### Analysis step-by-step
+
+```bash
+# In either stage1 or stage2:
+python3 feedback_analysis.py                # Analyze current feedback
+python3 feedback_analysis.py --propose      # Show proposed changes
+python3 feedback_analysis.py --apply        # Apply proposals to golden.json
+```
+
+**What it does:**
+
+1. **Read feedback**: `state/feedback.jsonl` (created by Bravo)
+2. **Categorize**: Group corrections by type:
+   - `tone`: response is technically correct but sounds wrong
+   - `policy_violation`: agent violated a policy rule
+   - `incomplete_info`: agent left out key information
+   - `factual_error`: agent stated something false
+   - `knowledge_gap`: agent didn't know something it should have looked up
+3. **Find patterns**: Which golden rows get the most feedback? What
+   categories dominate?
+4. **Propose changes**: When a row gets 2+ feedback entries in the same
+   category, suggest adding tags (e.g., "tone", "policy") to flag it
+   for higher weight in training
+5. **Output summary**: `state/feedback_summary.json` with patterns,
+   recommendations, and next steps
+
+### Feedback format (JSONL)
+
+Bravo writes feedback like this:
+
+```json
+{
+  "golden_id": "ord-status",
+  "correction": "What the agent should have said...",
+  "category": "tone",
+  "issue": "Agent tone was too formal",
+  "timestamp": "2026-09-13T10:00:00Z",
+  "feedbacker": "human"
+}
+```
+
+### Before/after evaluation
+
+Compare golden set scores before and after feedback integration:
+
+```bash
+# Stage 1 & 2:
+python3 evals.py              # Baseline score on current golden.json
+python3 feedback_analysis.py  # Run analysis
+python3 feedback_analysis.py --apply  # Apply proposals
+python3 evals.py              # New score after proposals applied
+```
+
+The `--feedback` flag shows analysis summary during eval runs:
+
+```bash
+python3 evals.py --feedback   # Shows feedback impact while running evals
+```
+
+### Example: Feedback → Golden Update
+
+**Before:**
+```json
+{
+  "id": "ord-track",
+  "tags": ["orders"],
+  "turns": ["Where is order 112-2222222-2222222?"],
+  "reference": "The Instant Pot Duo 6qt is in transit with Amazon Logistics..."
+}
+```
+
+**Human feedback:** "Agent response lacked shipping origin location"
+
+**Analysis result:** `incomplete_info` category flagged for `ord-track`
+
+**Proposal:** Update reference to include origin:
+```json
+{
+  "id": "ord-track",
+  "tags": ["orders", "knowledge_gap"],
+  "turns": ["Where is order 112-2222222-2222222?"],
+  "reference": "The Instant Pot Duo 6qt is in transit with Amazon Logistics. It shipped from Edison, NJ on September 12..."
+}
+```
+
+**Apply with:**
+```bash
+python3 feedback_analysis.py --apply
+```
+
+Then re-run evals to score the updated golden set.
+
+### Integration with policy layer (Stage 2)
+
+Policy violations in feedback suggest the policy.py layer needs tuning:
+
+```
+feedback category: policy_violation → suggests: review policy.py guardrails
+feedback category: tone              → suggests: review agent_profile.py tone
+feedback category: factual_error     → suggests: update knowledge/ documents
+```
+
+### Notes
+
+- Feedback is **separate** from the knowledge base (`knowledge/`).
+- Feedback **directly updates golden.json** golden rows.
+- Golden.json **controls what we grade against** (via `golden.py`), so
+  updating it makes the agent "learn" from corrections.
+- A golden row gets proposed changes **only if** the same feedback category
+  appears 2+ times across the feedback set (threshold prevents noise).
+- Backup: `golden.json.bak` is created when applying proposals.

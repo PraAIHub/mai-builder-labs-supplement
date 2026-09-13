@@ -7,7 +7,7 @@ top of its docstring.
 
     New:        ami/policy.py  ami/plan_execute.py
     Changed:    ami/planner.py  ami/tools.py  ami/agent_profile.py  ami/memory.py
-                main.py  web.py  evals.py  golden.py  golden.json
+                main.py  web.py  ui/chat.html  evals.py  golden.py  golden.json
     Unchanged:  everything else
 
     python3 web.py                            # http://localhost:8000 — planner switch in the header
