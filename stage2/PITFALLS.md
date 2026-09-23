@@ -17,7 +17,7 @@ any exploit at all.
 | | Path | What it is |
 |---|---|---|
 | **before** | `../ami-before/stage2` | the code exactly as committed — every pitfall is live |
-| **after** | `stage2` (this folder) | the fix, uncommitted on `feature/platform-auth-isolation` |
+| **after** | `stage2` (this folder) | the fix, on `main` since `85fcc20` |
 
 `ami-before` is a detached `git worktree`, so your fixed tree is untouched. To recreate
 it: `git worktree add --detach ../ami-before 2eca5d6`. To remove it when you're done:

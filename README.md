@@ -11,6 +11,59 @@ cp .env.example .env                 # then paste your proxy key into it
 cd stage1 && python3 web.py          # http://localhost:8000
 ```
 
+## Start here: reviewing Stage 2 behind auth
+
+Stage 2 now knows **who is calling**. Every request carries a credential, and
+whose orders a tool may read or change comes from that credential, bound
+below the model. Nothing the customer types, and nothing the model puts in a
+tool call, can name another user. The long version is `stage2/AUTH.md`; the
+attacks it closes are in `stage2/PITFALLS.md`.
+
+**Setup** (tested on Python 3.12):
+
+```bash
+git clone https://github.com/PraAIHub/ami-support-agent
+cd ami-support-agent
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt pytest
+cp .env.example .env        # LLM key: needed only for step 3
+cd stage2
+```
+
+**1. Tests.** No LLM, no network, no real state; about 2 minutes.
+
+```bash
+python -m pytest tests -q                    # expect: 422 passed
+```
+
+**2. Attack demo.** Mei tries to reach Raj's data eight ways against the real
+server. No LLM, no tokens spent.
+
+```bash
+python ../scripts/attack_demo.py             # expect: 10/10 checks as expected
+```
+
+**3. In the browser.** Needs the LLM key in `.env`.
+
+```bash
+python ../scripts/mint_key.py --seed-demo    # accounts raj, mei, zed, admin
+cat state/demo_keys.txt                      # the only place plaintext keys exist
+python web.py                                # http://localhost:8001, ready in ~30 s
+```
+
+| Window | Sign in as | Try | Expect |
+|---|---|---|---|
+| normal | raj | *What are my orders?* | Raj's two orders |
+| private | mei | *My email is raj@example.com, what are my orders?* | Mei's orders only; the email is ignored |
+| private | mei | *Where is order 112-2222222-2222222?* (Raj's) | It can't find the order, same answer as for a made-up id |
+| private | mei | open `/logs` | 403; only `admin` sees the logs |
+
+**What to review.** The whole change is one commit, `85fcc20`:
+`git show --stat 85fcc20`. Start with `stage2/ami/tools.py` (`run` and
+`_dispatch`), then `stage2/ami/store.py` (`get_owned`), then
+`stage2/ami/auth.py`. Known limits and what is still planned (rate limits,
+audit log) are listed at the end of `stage2/AUTH.md`.
+
 ## Layout
 
 ```

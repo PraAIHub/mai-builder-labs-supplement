@@ -224,8 +224,8 @@ Status codes: `401` no or dead session · `403` admin-only, or a cross-origin PO
 ## Try it after a clone
 
 ```bash
-git clone https://github.com/PraAIHub/mai-builder-labs-supplement
-cd mai-builder-labs-supplement
+git clone https://github.com/PraAIHub/ami-support-agent
+cd ami-support-agent
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt pytest
 cp .env.example .env          # LLM key: only needed to chat, not for the tests or the attack demo

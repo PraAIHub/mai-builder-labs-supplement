@@ -10,12 +10,15 @@ top of its docstring.
                 main.py  web.py  ui/chat.html  evals.py  golden.py  golden.json
     Unchanged:  everything else
 
-    python3 web.py                            # http://localhost:8000 — planner switch in the header
+    python3 web.py                            # http://localhost:8001 — sign in with a key (see AUTH.md)
     python3 main.py --plan                    # plan-and-execute in the terminal
     python3 evals.py --runs 2                 # score ReAct
     python3 evals.py --planner plan --runs 2  # score plan-and-execute
     python3 golden.py --audit                 # grade the judge itself, first
     python3 golden.py                         # 28 rows, including the policy layer
+
+Identity and per-user isolation: `AUTH.md` (the design and how to run it) and
+`PITFALLS.md` (the attacks it closes, run against the code before the fix).
 
 `.env` is one folder up. `state/` (sessions, trace, customer records) and
 `.cache/` are generated on first run; `results/` is where the eval scripts
