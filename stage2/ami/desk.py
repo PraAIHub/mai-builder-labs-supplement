@@ -51,14 +51,19 @@ TIMEOUT = httpx2.Timeout(10.0, read=30.0)
 # The four calls, as plain functions
 # --------------------------------------------------------------------------
 
-def create_ticket(title, body, customer_email=None, priority="normal"):
-    """Open a ticket for a human. Returns the ticket, or {"error": ...}."""
+def create_ticket(title, body, customer_email=None, customer_name=None,
+                  priority="normal"):
+    """Open a ticket for a human. Returns the ticket, or {"error": ...}.
+
+    Behind auth the agent always passes the signed-in customer's own email and
+    name; the env values are only the fallback for the class scripts."""
     args = {"title": title[:200], "body": body[:8000], "priority": priority}
     email = customer_email or CUSTOMER_EMAIL
+    name = customer_name or (CUSTOMER_NAME if not customer_email else "")
     if email:
         args["customer_email"] = email
-    if CUSTOMER_NAME:
-        args["body"] = f"{args['body']}\nReported by: {CUSTOMER_NAME} <{email}>\n"[:8000]
+    if name:
+        args["body"] = f"{args['body']}\nReported by: {name} <{email}>\n"[:8000]
     return _call("create_ticket", args)
 
 

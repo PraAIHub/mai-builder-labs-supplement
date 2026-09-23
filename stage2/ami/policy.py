@@ -98,7 +98,10 @@ def guarded_run(name, args, work):
                                f"them to confirm. Call again with confirmed=true "
                                f"only after they say yes in their own words."}
 
-    return tools.run(name, args)
+    # The caller's identity rides in working memory, set by the server. A
+    # confirmation proves the customer agreed; it says nothing about whose
+    # order it is — the tool asks that, using the principal.
+    return tools.run(name, args, getattr(work, "principal", None))
 
 
 # --------------------------------------------------------------------------

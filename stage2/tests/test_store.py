@@ -10,6 +10,7 @@ from datetime import date, timedelta
 import pytest
 
 from ami import store, tools
+from fakes import MEI, RAJ
 
 
 class TestSeedData:
@@ -52,13 +53,13 @@ class TestCancelGuardrail:
 
     def test_cancel_preparing_order_succeeds(self, fresh_store):
         """A preparing order can be cancelled."""
-        result = tools.cancel_order("112-3333333-3333333")
+        result = tools.cancel_order(MEI, "112-3333333-3333333")
         assert result["cancelled"] is True
         assert result["refund_amount"] == 149.99
 
     def test_cancel_shipped_order_is_refused(self, fresh_store):
         """A shipped order cannot be cancelled — it must be returned."""
-        result = tools.cancel_order("112-2222222-2222222")
+        result = tools.cancel_order(RAJ, "112-2222222-2222222")
         assert "error" in result
         assert "already shipped" in result["error"]
         # Verify the order status did not change
@@ -66,20 +67,20 @@ class TestCancelGuardrail:
 
     def test_cancel_delivered_order_is_refused(self, fresh_store):
         """A delivered order cannot be cancelled."""
-        result = tools.cancel_order("112-1111111-1111111")
+        result = tools.cancel_order(RAJ, "112-1111111-1111111")
         assert "error" in result
         assert "already delivered" in result["error"]
 
     def test_cancel_nonexistent_order_is_refused(self, fresh_store):
         """Asking for a nonexistent order returns an error."""
-        result = tools.cancel_order("111-9999999-9999999")
+        result = tools.cancel_order(RAJ, "111-9999999-9999999")
         assert "error" in result
         assert "No order found" in result["error"]
 
     def test_cancel_already_cancelled_order_is_refused(self, fresh_store):
         """Once cancelled, it cannot be cancelled again."""
-        tools.cancel_order("112-3333333-3333333")
-        result = tools.cancel_order("112-3333333-3333333")
+        tools.cancel_order(MEI, "112-3333333-3333333")
+        result = tools.cancel_order(MEI, "112-3333333-3333333")
         assert "error" in result
         assert "already cancelled" in result["error"]
 
@@ -89,7 +90,7 @@ class TestReturnGuardrail:
 
     def test_return_delivered_order_succeeds(self, fresh_store):
         """A delivered order within the window can be returned."""
-        result = tools.start_return("112-1111111-1111111", "item is broken")
+        result = tools.start_return(RAJ, "112-1111111-1111111", "item is broken")
         assert "rma" in result
         assert result["rma"].startswith("RMA-")
         assert result["refund_amount"] == 348.00
@@ -98,33 +99,33 @@ class TestReturnGuardrail:
 
     def test_return_nondelivered_order_is_refused(self, fresh_store):
         """A shipped (not delivered) order cannot be returned."""
-        result = tools.start_return("112-2222222-2222222", "wrong size")
+        result = tools.start_return(RAJ, "112-2222222-2222222", "wrong size")
         assert "error" in result
         assert "not delivered" in result["error"]
 
     def test_return_preparing_order_is_refused(self, fresh_store):
         """A preparing order cannot be returned."""
-        result = tools.start_return("112-3333333-3333333", "changed mind")
+        result = tools.start_return(MEI, "112-3333333-3333333", "changed mind")
         assert "error" in result
         assert "not delivered" in result["error"]
 
     def test_return_past_window_is_refused(self, fresh_store):
         """A delivered order outside the 30-day window is refused."""
-        result = tools.start_return("112-4444444-4444444", "never worked")
+        result = tools.start_return(MEI, "112-4444444-4444444", "never worked")
         assert "error" in result
         assert "past the" in result["error"]
         assert "30-day" in result["error"]
 
     def test_return_nonexistent_order_is_refused(self, fresh_store):
         """Asking for a nonexistent order returns an error."""
-        result = tools.start_return("111-9999999-9999999", "test")
+        result = tools.start_return(RAJ, "111-9999999-9999999", "test")
         assert "error" in result
         assert "No order found" in result["error"]
 
     def test_multiple_returns_create_unique_rmas(self, fresh_store):
         """Each return gets a distinct RMA number."""
-        result1 = tools.start_return("112-1111111-1111111", "broken")
-        result2 = tools.start_return("112-2222222-2222222", "wrong item")
+        result1 = tools.start_return(RAJ, "112-1111111-1111111", "broken")
+        result2 = tools.start_return(RAJ, "112-2222222-2222222", "wrong item")
         # This second one will fail because it's shipped, but let's try another delivered one
         # Actually, we only have one more delivered order in the window. Let's skip this test
         # or test it differently.
@@ -142,7 +143,7 @@ class TestReturnsTracking:
     """When a return starts, it is tracked in RETURNS."""
 
     def test_return_is_recorded(self, fresh_store):
-        result = tools.start_return("112-1111111-1111111", "not as described")
+        result = tools.start_return(RAJ, "112-1111111-1111111", "not as described")
         rma = result["rma"]
         assert rma in store.RETURNS
         assert store.RETURNS[rma]["order_id"] == "112-1111111-1111111"

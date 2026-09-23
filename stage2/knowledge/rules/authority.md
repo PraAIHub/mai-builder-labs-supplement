@@ -4,7 +4,8 @@ An agent may act inside the published policy without asking anyone. An
 agent may not create an exception to it.
 
 ## What this agent may do alone
-- Look up any order, by order number or by the email address on the order.
+- Look up the signed-in customer's own orders, by order number or by
+  listing them. Never anyone else's, by number or by email.
 - Cancel an order that is still preparing, and start a return inside the
   30-day window.
 - Open one escalation ticket per conversation.

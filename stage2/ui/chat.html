@@ -74,6 +74,14 @@
                      border-radius:6px; padding:8px 12px; cursor:pointer; font-size:12px; }
   .feedback-submit:hover { border-color:var(--accent); }
   .feedback-status { font-size:12px; color:var(--dim); margin-top:6px; }
+  /* Sign-in: covers the page until a key has been exchanged for a session. */
+  #login { position:fixed; inset:0; z-index:10; background:var(--bg);
+           display:none; align-items:center; justify-content:center; }
+  #login form { flex-direction:column; width:340px; border:1px solid var(--line);
+                border-radius:12px; padding:22px; background:var(--panel); gap:10px; }
+  #login h2 { margin:0; font-size:16px; } #login h2 b { color:var(--accent); }
+  #login p { margin:0; color:var(--dim); font-size:12px; }
+  #loginErr { color:var(--err); font-size:12px; min-height:16px; }
 </style>
 
 <div class="col" id="left">
@@ -83,7 +91,9 @@
       <option value="react">ReAct — step by step</option>
       <option value="plan">Plan-and-execute — plan first</option>
     </select>
-    <button onclick="reset()">Reset session</button></header>
+    <button onclick="reset()">Reset session</button>
+    <span id="who" title="Signed in as"></span>
+    <button onclick="signOut()" style="margin-left:0">Sign out</button></header>
   <div id="activity"></div>
   <div id="chat"></div>
   <form onsubmit="send(event)">
@@ -106,7 +116,7 @@
 
 <div class="col" id="right">
   <header><b>Agent internals</b><span>what it thought, what it remembers</span>
-    <a href="/logs" target="_blank" style="margin-left:auto; color:var(--dim);
+    <a id="logsLink" href="/logs" target="_blank" hidden style="margin-left:auto; color:var(--dim);
        text-decoration:none; border:1px solid var(--line); border-radius:6px;
        padding:5px 11px; font-size:12px">Logs &rarr;</a></header>
   <div id="panel">
@@ -124,9 +134,63 @@
   </div>
 </div>
 
+<div id="login">
+  <form onsubmit="signIn(event)">
+    <h2><b>Ami</b> — sign in</h2>
+    <p>Enter your API key to start a session. It is sent once, to sign in, and is not
+       kept in this browser.</p>
+    <input id="key" type="password" autocomplete="off" spellcheck="false"
+           placeholder="ami_…" aria-label="API key">
+    <div id="loginErr"></div>
+    <button type="submit" style="margin:0">Start session</button>
+  </form>
+</div>
+
 <script>
 const GREETING = __GREETING__;
 const $ = id => document.getElementById(id);
+
+// Every call goes through here. A 401 means there is no live session — expired,
+// signed out, or the account was revoked — so show the sign-in, whatever the
+// call was. JSON bodies carry Content-Type: application/json, which the server
+// requires (a page on another site cannot send it without a preflight).
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)});
+  if (r.status === 401) { showLogin(); throw new Error('sign in required'); }
+  return r;
+}
+
+function showLogin(msg) {
+  $('login').style.display = 'flex';
+  $('loginErr').textContent = msg || '';
+  $('key').focus();
+}
+
+function showUser(u) {
+  $('who').textContent = u.email;
+  $('logsLink').hidden = u.role !== 'admin';
+}
+
+async function signIn(e) {
+  e.preventDefault();
+  const key = $('key').value.trim();
+  $('key').value = '';                       // the key never lingers in the page
+  if (!key) return;
+  const r = await fetch('/session', {method: 'POST',
+                                     headers: {Authorization: 'Bearer ' + key}});
+  if (!r.ok) { showLogin('That key was not accepted.'); return; }
+  $('login').style.display = 'none';
+  $('chat').innerHTML = ''; $('activity').innerHTML = '';
+  start();
+}
+
+async function signOut() {
+  await fetch('/logout', {method: 'POST'});
+  $('chat').innerHTML = ''; $('activity').innerHTML = '';
+  showLogin();
+}
 
 // The model writes **bold**. Escape everything first, THEN allow bold —
 // never the other way round, or a customer could inject HTML.
@@ -168,6 +232,7 @@ function drawActivity(d) {
 }
 
 function draw(d) {
+  if (d.user) showUser(d.user);
   drawActivity(d);
   $('nmsg').textContent = d.messages;
   $('nord').textContent = d.orders;
@@ -209,8 +274,7 @@ async function send(e) {
   bubble('You', text);
   const pending = bubble('Ami', 'thinking…');
   try {
-    const r = await fetch('/chat', {method:'POST',
-      body: JSON.stringify({message:text, planner: $('planner').value})});
+    const r = await api('/chat', {message:text, planner: $('planner').value});
     const d = await r.json();
     pending.querySelector('.bubble').innerHTML = render(d.reply);
     draw(d);
@@ -232,14 +296,11 @@ async function submitFeedback() {
   }
 
   try {
-    const r = await fetch('/feedback', {
-      method: 'POST',
-      body: JSON.stringify({
-        original_response: original,
-        corrected_response: corrected,
-        reason: reason || null,
-        golden_row_id: null
-      })
+    const r = await api('/feedback', {
+      original_response: original,
+      corrected_response: corrected,
+      reason: reason || null,
+      golden_row_id: null
     });
     const d = await r.json();
     if (d.ok) {
@@ -259,7 +320,7 @@ async function submitFeedback() {
 }
 
 async function reset() {
-  const r = await fetch('/reset', {method:'POST', body:'{}'});
+  const r = await api('/reset', {});
   const d = await r.json();
   $('chat').innerHTML = '';
   bubble('Ami', GREETING);
@@ -267,22 +328,17 @@ async function reset() {
 }
 
 // A reload must not show a clean slate over a session that is not clean.
-// Ask the server what it holds for this browser before drawing anything.
-bubble('Ami', GREETING);
-fetch('/state').then(r => r.json()).then(d => {
-  draw({...d, steps: []});
-  if (d.stale) {
-    // The server did not recognise this browser's session. Never pretend
-    // that is a fresh chat — the customer can still see their old messages.
-    const el = document.createElement('div');
-    el.className = 'entry lost';
-    el.innerHTML = '<div class="dot"></div><div><b>Earlier conversation not found</b>'
-                 + '<br><span>The server was restarted, so Ami no longer has this '
-                 + 'chat\'s history. Anything above this line is not remembered.</span></div>';
-    $('activity').append(el);
-  } else if (d.messages > 0) {
-    bubble('Ami', '(Picking up an earlier conversation — the summary above '
-                + 'shows what has already happened. Press Reset session to start over.)');
-  }
-});
+// Ask the server what it holds for this user before drawing anything. With
+// no live session that call answers 401 and api() shows the sign-in instead.
+function start() {
+  bubble('Ami', GREETING);
+  api('/state').then(r => r.json()).then(d => {
+    draw({...d, steps: []});
+    if (d.messages > 0) {
+      bubble('Ami', '(Picking up your earlier conversation — the summary above '
+                  + 'shows what has already happened. Press Reset session to start over.)');
+    }
+  }).catch(() => {});
+}
+start();
 </script>

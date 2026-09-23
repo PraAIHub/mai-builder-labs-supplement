@@ -17,8 +17,9 @@ from ami.llm import MODEL, complete
 MAX_STEPS = 6   # stop a runaway loop from calling tools forever
 
 
-def respond(messages, verbose=True):
-    """Advance the conversation until the model produces a reply for the user."""
+def respond(messages, principal, verbose=True):
+    """Advance the conversation until the model produces a reply for the user.
+    `principal` is who is signed in; the tools bind it, the model never sees it."""
     for _ in range(MAX_STEPS):
         response = complete(messages, tools=tools.SCHEMAS)
         message = response.choices[0].message
@@ -36,7 +37,7 @@ def respond(messages, verbose=True):
             except json.JSONDecodeError:
                 args = {}
 
-            result = tools.run(name, args)
+            result = tools.run(name, args, principal)
             if verbose:
                 print(f"   [tool] {name}({args}) -> {result}")
 

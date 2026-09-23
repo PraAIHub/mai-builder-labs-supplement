@@ -12,7 +12,7 @@ Every model reply is scripted with fakes.py, so nothing here calls the model.
 
 from ami import planner, tools
 from ami.memory import ConversationMemory, WorkingMemory
-from fakes import Reply, tool_call
+from fakes import RAJ, Reply, signed_in, tool_call
 
 DELIVERED = "112-1111111-1111111"          # raj@example.com, delivered
 
@@ -51,7 +51,7 @@ def test_planner_does_not_change_the_original_tool_schemas():
 
 def test_react_returns_the_reply_when_the_model_calls_no_tool(fake_llm):
     fake_llm.script(Reply(content="Happy to help."))
-    convo, work = ConversationMemory("system"), WorkingMemory()
+    convo, work = ConversationMemory("system"), signed_in()
 
     assert planner.react(convo, work, trace=False) == "Happy to help."
     assert convo.messages()[-1] == {"role": "assistant", "content": "Happy to help."}
@@ -59,7 +59,7 @@ def test_react_returns_the_reply_when_the_model_calls_no_tool(fake_llm):
 
 def test_react_sends_the_thought_schemas_and_the_working_memory_brief(fake_llm):
     fake_llm.script(Reply(content="ok"))
-    convo, work = ConversationMemory("system"), WorkingMemory()
+    convo, work = ConversationMemory("system"), signed_in()
     convo.add_user("where is my order?")
     expected = convo.messages(extra_system=work.brief())
 
@@ -76,7 +76,7 @@ def test_react_runs_the_tool_and_keeps_the_thought_out_of_its_arguments(fake_llm
                                     thought="I need the order first")]),
         Reply(content="It was delivered."),
     )
-    convo, work, steps = ConversationMemory("system"), WorkingMemory(), []
+    convo, work, steps = ConversationMemory("system"), signed_in(), []
 
     result = planner.react(convo, work, trace=False, steps=steps)
 
@@ -86,7 +86,7 @@ def test_react_runs_the_tool_and_keeps_the_thought_out_of_its_arguments(fake_llm
         "thought": "I need the order first",
         "tool": "get_order",
         "args": {"order_id": DELIVERED},
-        "observation": tools.run("get_order", {"order_id": DELIVERED}),
+        "observation": tools.run("get_order", {"order_id": DELIVERED}, RAJ),
     }]
 
 
@@ -95,7 +95,7 @@ def test_react_puts_the_observation_back_into_the_conversation(fake_llm, fresh_s
         Reply(tool_calls=[tool_call("get_order", order_id=DELIVERED, thought="t")]),
         Reply(content="done"),
     )
-    convo, work = ConversationMemory("system"), WorkingMemory()
+    convo, work = ConversationMemory("system"), signed_in()
 
     planner.react(convo, work, trace=False)
 
@@ -110,7 +110,7 @@ def test_react_updates_working_memory_from_the_observation(fake_llm, fresh_store
         Reply(tool_calls=[tool_call("get_order", order_id=DELIVERED, thought="t")]),
         Reply(content="done"),
     )
-    convo, work = ConversationMemory("system"), WorkingMemory()
+    convo, work = ConversationMemory("system"), signed_in()
 
     planner.react(convo, work, trace=False)
 
@@ -121,7 +121,7 @@ def test_react_treats_unreadable_arguments_as_an_empty_call(fake_llm, fresh_stor
     broken = tool_call("get_order")
     broken.function.arguments = "not json"
     fake_llm.script(Reply(tool_calls=[broken]), Reply(content="sorry"))
-    convo, work, steps = ConversationMemory("system"), WorkingMemory(), []
+    convo, work, steps = ConversationMemory("system"), signed_in(), []
 
     assert planner.react(convo, work, trace=False, steps=steps) == "sorry"
     assert steps[0]["args"] == {}
@@ -132,7 +132,7 @@ def test_react_treats_unreadable_arguments_as_an_empty_call(fake_llm, fresh_stor
 def test_react_gives_up_after_max_steps(fake_llm, fresh_store):
     looping = Reply(tool_calls=[tool_call("get_order", order_id=DELIVERED, thought="again")])
     fake_llm.script(*[looping] * planner.MAX_STEPS)
-    convo, work, steps = ConversationMemory("system"), WorkingMemory(), []
+    convo, work, steps = ConversationMemory("system"), signed_in(), []
 
     result = planner.react(convo, work, trace=False, steps=steps)
 
@@ -145,12 +145,12 @@ def test_react_prints_the_trace_only_when_asked(fake_llm, fresh_store, capsys):
     step = Reply(tool_calls=[tool_call("get_order", order_id=DELIVERED, thought="look it up")])
 
     fake_llm.script(step, Reply(content="done"))
-    planner.react(ConversationMemory("s"), WorkingMemory(), trace=True)
+    planner.react(ConversationMemory("s"), signed_in(), trace=True)
     out = capsys.readouterr().out
     assert "[1] Thought: look it up" in out
     assert f"Action: get_order(order_id={DELIVERED!r})" in out
     assert "Observation:" in out
 
     fake_llm.script(step, Reply(content="done"))
-    planner.react(ConversationMemory("s"), WorkingMemory(), trace=False)
+    planner.react(ConversationMemory("s"), signed_in(), trace=False)
     assert capsys.readouterr().out == ""

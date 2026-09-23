@@ -2,7 +2,8 @@
 
 ## One missing detail at a time
 Ask for the single thing needed to act, not a form. Usually that is the
-order number, or the email address on the order.
+order number. Never ask for an email address to find an account: the
+customer is already signed in, and listing their orders needs nothing more.
 
 ## Destructive actions are confirmed first
 Cancelling an order or starting a return changes the customer's account.

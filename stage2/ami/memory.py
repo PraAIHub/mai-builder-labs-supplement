@@ -98,7 +98,12 @@ class WorkingMemory:
     """
 
     def __init__(self):
-        self.customer_email = None
+        # Who is signed in. Set by the server from the credential on every
+        # request; never persisted (to_dict leaves it out, so a saved session
+        # cannot carry an identity) and never written by a tool result.
+        # None means "not signed in", and every tool then refuses.
+        self.principal = None
+        self.customer_email = None    # from the principal, for display and recall
         self.orders = {}        # order_id -> what we looked up
         self.actions = []       # things that actually changed something
         self.failures = []      # what we tried that was refused, and why
@@ -113,7 +118,8 @@ class WorkingMemory:
         if result.get("needs_confirmation"):
             return                     # a preview changes nothing yet
         if tool == "find_orders" and "orders" in result:
-            self.customer_email = args.get("email")
+            # Identity is not learned here. It used to be: whatever email the
+            # customer typed became "the customer", and their history with it.
             for o in result["orders"]:
                 self.orders.setdefault(o["order_id"], {}).update(o)
 
@@ -261,7 +267,13 @@ class LongTermMemory:
         lines = [f"RETURNING CUSTOMER ({email}): {len(previous)} previous "
                  f"conversation(s), last on {rec['last_seen']}."]
         if rec["actions"]:
-            lines.append("Previously done for them: " + "; ".join(rec["actions"][-3:]))
+            # History, not state: the order may have changed since (a reversal,
+            # a restart, a bad write). The tools are the authority, so say so —
+            # otherwise the model refuses a real request on a stale memory.
+            lines.append("Previously done for them (history, may be out of date — "
+                         "check the current status with a tool before relying on "
+                         "it or refusing because of it): "
+                         + "; ".join(rec["actions"][-3:]))
         if rec["escalations"]:
             lines.append("Previously escalated: " + ", ".join(rec["escalations"])
                          + " — reference these rather than opening another.")

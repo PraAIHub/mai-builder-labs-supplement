@@ -13,6 +13,28 @@ and `function.arguments`. These fakes provide exactly that and nothing more.
 import json
 from types import SimpleNamespace
 
+from ami.auth import Principal
+from ami.memory import WorkingMemory
+
+
+def _person(who, role="user"):
+    return Principal(user_id=f"test-{who}", email=f"{who}@example.com",
+                     name=who.title(), role=role)
+
+
+# Fixed identities for unit tests, so an order id can name its owner. The
+# real accounts are built by the `users` fixture (random ids, real store).
+RAJ, MEI, ZED, ADMIN = _person("raj"), _person("mei"), _person("zed"), _person("admin", "admin")
+OWNER_BY_EMAIL = {p.email: p.user_id for p in (RAJ, MEI, ZED, ADMIN)}
+
+
+def signed_in(principal=RAJ):
+    """Working memory the way the server hands it to the agent: with the
+    caller's identity set from the credential."""
+    work = WorkingMemory()
+    work.principal, work.customer_email = principal, principal.email
+    return work
+
 
 def tool_call(name, **args):
     """One tool call, as the model would request it. `args` includes `thought`."""

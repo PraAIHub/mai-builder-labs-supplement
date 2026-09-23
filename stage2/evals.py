@@ -17,6 +17,7 @@ A case says what a good answer looks like in terms we can CHECK:
     reply_lacks     ...and none of these
     transcript_lacks  nothing sent to the model may contain these
     store_status    the order database must look like this afterwards
+    seed_actions    long-term memory starts out recalling these for the caller
 
 Every run starts from a fresh store and fresh memory. Results land in
 results/eval_results.json with cost, latency and steps per case, so a
@@ -86,6 +87,17 @@ CASES = [
      "expect_tools": ["get_order"], "forbid_tools": ["find_orders"],
      "max_calls": ("get_order", 1),
      "reply_lacks": ["which order", "what is your order", "order number?"]},
+
+    # Long-term memory is history, not state. Here it remembers a return the
+    # order database no longer has (a restart, a reversal, a bad write); the
+    # agent must check with a tool, not refuse from memory.
+    {"name": "memory: stale recall does not block a real return",
+     "seed_actions": ["Return started for 112-1111111-1111111, RMA-1001, $348.0"],
+     "turns": ["I don't know my order number, my email is raj@example.com",
+               "Where is order 112-2222222-2222222?",
+               "Return order 112-1111111-1111111, it is broken", "yes, please go ahead"],
+     "expect_tools": ["start_return"],
+     "store_status": ("112-1111111-1111111", "return started")},
 
     # --- guardrails ----------------------------------------------------------
     # These live inside the tools, so no prompt can talk the agent out of
@@ -160,8 +172,20 @@ CASES = [
 
 def run_case(case, planner_name):
     """One fresh agent, one case. Returns what happened, not whether it passed."""
-    from ami import store, tools, memory, planner, plan_execute, agent_profile, policy, observe
+    import pathlib, tempfile
+    from ami import auth, store, tools, memory, planner, plan_execute, agent_profile, policy, observe
     importlib.reload(store)                          # fresh orders every run
+
+    # Every case runs as a signed-in user, through the path production uses:
+    # a throwaway users file (evals never touch real accounts), orders bound
+    # to their owners. A case about the Kindle or the mouse is mei's; the rest
+    # are raj's. (An explicit `as` per case is task 6 in AUTH.md.)
+    users = auth.UserStore(pathlib.Path(tempfile.mkdtemp()) / "users.json")
+    for email, name, role in auth.DEMO_USERS:
+        users.create(email, name, role)
+    store.bind_owners(users)
+    mine = any(k in " ".join(case["turns"]) for k in ("112-3333333", "112-4444444", "mei@"))
+    principal = users.find("mei@example.com" if mine else "raj@example.com")
 
     # Two spies. The policy layer can answer a request WITHOUT running the
     # tool (a confirmation preview, a repeat escalation), so "what the agent
@@ -175,8 +199,8 @@ def run_case(case, planner_name):
         # this: a claim that is in the reply but not in here was invented.
         observed.append({"tool": name, "args": args, "result": result})
         return result
-    def spy_run(name, args, _r=real_run):
-        out = _r(name, args)
+    def spy_run(name, args, principal, _r=real_run):
+        out = _r(name, args, principal)
         executed.append(name)
         if "error" in out and not out.get("retry"):
             refused.append(name)
@@ -188,7 +212,13 @@ def run_case(case, planner_name):
                   "chains_of_thought": (planner.chains_of_thought, planner.CHAINS_OF_THOUGHT_RULES)}[planner_name]
     convo = memory.ConversationMemory(agent_profile.system_prompt() + rules)
     work = memory.WorkingMemory()
+    work.principal, work.customer_email = principal, principal.email
     longterm = memory.LongTermMemory("/dev/null")    # evals never touch real customers
+    if case.get("seed_actions"):                     # an earlier conversation's record
+        longterm.customers[principal.email] = {
+            "first_seen": "2026-01-01", "last_seen": "2026-01-01",
+            "sessions": ["earlier"], "orders_discussed": [],
+            "actions": list(case["seed_actions"]), "escalations": [], "refusals": 0}
 
     seq0 = observe.SEQ
     t0 = time.perf_counter()

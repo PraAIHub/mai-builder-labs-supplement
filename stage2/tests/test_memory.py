@@ -105,15 +105,22 @@ class TestConversationMemoryTrimming:
 class TestWorkingMemoryRecords:
     """WorkingMemory records facts from tool results."""
 
-    def test_find_orders_records_customer_email(self):
+    def test_find_orders_does_not_set_identity(self):
+        """Who the customer is comes from the credential, never from a tool's
+        arguments — it used to be whatever email find_orders was called with."""
         w = WorkingMemory()
-        result = {
-            "orders": [
-                {"order_id": "o1", "item": "Thing", "status": "delivered", "ordered_on": "2026-01-01"}
-            ]
-        }
-        w.record("find_orders", {"email": "test@example.com"}, result)
-        assert w.customer_email == "test@example.com"
+        result = {"orders": [{"order_id": "o1", "item": "Thing", "status": "delivered",
+                              "ordered_on": "2026-01-01"}]}
+        w.record("find_orders", {"email": "someone.else@example.com"}, result)
+        assert w.customer_email is None
+        assert "o1" in w.orders            # the orders themselves are still noted
+
+    def test_principal_is_not_persisted(self):
+        """A saved session must not be able to carry an identity across."""
+        from fakes import signed_in
+        w = signed_in()
+        assert "principal" not in w.to_dict()
+        assert WorkingMemory.from_dict(w.to_dict()).principal is None
 
     def test_find_orders_records_order_details(self):
         w = WorkingMemory()
@@ -450,6 +457,17 @@ class TestLongTermMemory:
         recall = ltm.recall("eve@example.com", current_session="s2")
         assert "Previously done" in recall
         assert "Cancelled" in recall
+
+    def test_recall_marks_actions_as_history_not_state(self, tmp_state):
+        """Recalled actions can be stale; the note must send the model to a tool."""
+        ltm = LongTermMemory(path=tmp_state / "customers.json")
+        work = WorkingMemory()
+        work.customer_email = "eve@example.com"
+        work.actions = ["Return started for o1, RMA-1001, $348.0"]
+        ltm.remember(work, session_id="s1")
+        recall = ltm.recall("eve@example.com", current_session="s2")
+        assert "may be out of date" in recall
+        assert "check the current status with a tool" in recall
 
     def test_recall_includes_previous_escalations(self, tmp_state):
         """Previous escalations are included in the recall note."""

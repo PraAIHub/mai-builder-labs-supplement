@@ -18,6 +18,7 @@ import pytest
 
 from ami import policy
 from ami.memory import WorkingMemory
+from fakes import MEI, RAJ, signed_in
 
 
 class TestCheckInputScrubbing:
@@ -107,12 +108,12 @@ class TestGuardedRunEscalateOnce:
     """guarded_run() enforces: one escalation per conversation."""
 
     def test_first_escalate_succeeds(self):
-        work = WorkingMemory()
+        work = signed_in()
         result = policy.guarded_run("escalate", {"summary": "Help needed"}, work)
         assert "escalated" in result or "error" not in result
 
     def test_second_escalate_uses_existing_ticket(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.escalation = "ESC-123"
         result = policy.guarded_run("escalate", {"summary": "Another request"}, work)
         assert "escalated" in result
@@ -120,7 +121,7 @@ class TestGuardedRunEscalateOnce:
         assert "already escalated" in result.get("message", "").lower()
 
     def test_escalate_once_logged(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.escalation = "ESC-456"
         result = policy.guarded_run("escalate", {"summary": "Help"}, work)
         # Should return the cached ticket, not escalate again
@@ -132,7 +133,7 @@ class TestGuardedRunConfirmation:
 
     def test_cancel_order_without_confirmation_returns_preview(self):
         """First call to cancel_order without confirmed=true is a preview."""
-        work = WorkingMemory()
+        work = signed_in()
         work.turn = 1
         result = policy.guarded_run("cancel_order", {"order_id": "o1"}, work)
         assert "needs_confirmation" in result
@@ -143,7 +144,7 @@ class TestGuardedRunConfirmation:
 
     def test_cancel_order_with_confirmation_runs_tool(self, fresh_store):
         """Second call with confirmed=true runs the actual tool."""
-        work = WorkingMemory()
+        work = signed_in(MEI)              # 112-3333333 is mei's order
         work.turn = 1
         # First call to set pending
         policy.guarded_run("cancel_order", {"order_id": "112-3333333-3333333"}, work)
@@ -160,7 +161,7 @@ class TestGuardedRunConfirmation:
 
     def test_confirmation_must_span_turns(self, fresh_store):
         """A confirmation in the same turn as the request is ignored."""
-        work = WorkingMemory()
+        work = signed_in()
         work.turn = 1
         # First call to set pending
         policy.guarded_run("cancel_order", {"order_id": "112-3333333-3333333"}, work)
@@ -176,7 +177,7 @@ class TestGuardedRunConfirmation:
 
     def test_start_return_confirmation_gate(self, fresh_store):
         """start_return also requires confirmation."""
-        work = WorkingMemory()
+        work = signed_in()
         work.turn = 1
         result = policy.guarded_run(
             "start_return", {"order_id": "112-1111111-1111111", "reason": "broken"},
@@ -187,7 +188,7 @@ class TestGuardedRunConfirmation:
 
     def test_confirmed_false_not_accepted(self, fresh_store):
         """confirmed=false is not the same as no confirmation."""
-        work = WorkingMemory()
+        work = signed_in()
         work.turn = 1
         # First call to set pending
         policy.guarded_run("cancel_order", {"order_id": "112-3333333-3333333"}, work)
@@ -203,7 +204,7 @@ class TestGuardedRunConfirmation:
 
     def test_different_order_id_different_pending(self, fresh_store):
         """Confirming a different order is a new pending request."""
-        work = WorkingMemory()
+        work = signed_in()
         work.turn = 1
         # Request to cancel order 1
         policy.guarded_run("cancel_order", {"order_id": "o1"}, work)
@@ -218,7 +219,7 @@ class TestCheckOutputVerification:
     """check_output() verifies all identifiers came from tools."""
 
     def test_known_order_number_passes(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.orders = {"112-1111111-1111111": {}}
         reply = "Your order 112-1111111-1111111 is ready."
         checked = policy.check_output(reply, work)
@@ -226,7 +227,7 @@ class TestCheckOutputVerification:
         assert "[unverified]" not in checked
 
     def test_unknown_order_number_redacted(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.orders = {}
         reply = "Your order 999-9999999-9999999 has shipped."
         checked = policy.check_output(reply, work)
@@ -234,21 +235,21 @@ class TestCheckOutputVerification:
         assert "[unverified]" in checked
 
     def test_escalation_ticket_passes(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.escalation = "ESC-123"
         reply = "I've opened ticket ESC-123 for you."
         checked = policy.check_output(reply, work)
         assert "ESC-123" in checked
 
     def test_rma_number_passes_if_from_action(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.actions = ["Return started for o1, RMA-1001"]
         reply = "Your return number is RMA-1001."
         checked = policy.check_output(reply, work)
         assert "RMA-1001" in checked
 
     def test_unknown_rma_redacted(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.actions = []
         reply = "Your RMA number is RMA-9999."
         checked = policy.check_output(reply, work)
@@ -257,7 +258,7 @@ class TestCheckOutputVerification:
 
     def test_customer_input_provides_context(self):
         """Identifiers the customer said are trusted."""
-        work = WorkingMemory()
+        work = signed_in()
         work.orders = {}
         user_text = "My order is 112-1111111-1111111"
         reply = "Got it, 112-1111111-1111111 is yours."
@@ -267,7 +268,7 @@ class TestCheckOutputVerification:
 
     def test_failure_provides_context(self):
         """Identifiers from failures are known."""
-        work = WorkingMemory()
+        work = signed_in()
         work.orders = {}
         work.failures = ["cancel_order(112-1111111-1111111) refused: already shipped"]
         reply = "112-1111111-1111111 cannot be cancelled."
@@ -280,7 +281,7 @@ class TestCheckOutputMultipleIdentifiers:
     """check_output() handles multiple identifiers in one reply."""
 
     def test_mixed_known_unknown(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.orders = {"o1": {}}
         work.escalation = "ESC-1"
         reply = "Order o1 is approved. RMA-999 is not valid. Ticket ESC-1 is open."
@@ -291,7 +292,7 @@ class TestCheckOutputMultipleIdentifiers:
         assert "[unverified]" in checked
 
     def test_all_identifiers_unverified_all_redacted(self):
-        work = WorkingMemory()
+        work = signed_in()
         work.orders = {}
         work.escalation = None
         reply = "Order 112-1111111-1111111, RMA-1001, ESC-500."

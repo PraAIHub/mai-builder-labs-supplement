@@ -74,3 +74,38 @@ ORDERS = {
 RETURNS = {}
 
 RETURN_WINDOW_DAYS = 30
+
+
+# --------------------------------------------------------------------------
+# Who owns what. Every read and write of an order goes through these, so
+# "is this yours?" is answered in one place and never by the caller.
+# --------------------------------------------------------------------------
+
+def bind_owners(users):
+    """Attach each seeded order to the account that owns it.
+
+    The `email` on a seed order only says who the demo data was written for;
+    THIS is where it becomes an owner_id, once, on the server, from the user
+    store. A request never gets to name an owner. An order whose email has no
+    active account belongs to no one and is invisible to everyone.
+    """
+    for order in ORDERS.values():
+        principal = users.find(order["email"])
+        order["owner_id"] = principal.user_id if principal else None
+
+
+def get_owned(order_id, principal):
+    """The order if it exists AND is the caller's, else None. Callers must
+    not distinguish 'not yours' from 'not there' — a different answer would
+    confirm the id exists."""
+    if principal is None or not principal.user_id:
+        return None
+    order = ORDERS.get(str(order_id).strip())
+    return order if order and order.get("owner_id") == principal.user_id else None
+
+
+def orders_of(principal):
+    """Every order the caller owns, and only those."""
+    if principal is None or not principal.user_id:
+        return []
+    return [o for o in ORDERS.values() if o.get("owner_id") == principal.user_id]
